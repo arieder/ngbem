@@ -4,8 +4,8 @@ project (NgBem)
 
 find_package ( NGSolve CONFIG REQUIRED )
 
-
-set (CMAKE_CXX_STANDARD 14)
+Set(CMAKE_CXX_COMPILER "ngscxx" CACHE STRING "" FORCE)
+#set (CMAKE_CXX_STANDARD 14)
 
 
 set(CMAKE_MODULE_PATH ${CMAKE_MODULE_PATH} ${CMAKE_SOURCE_DIR}/cmake/ ${CMAKE_SOURCE_DIR}/cmake/GreatCMakeCookOff/)

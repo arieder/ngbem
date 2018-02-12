@@ -1,0 +1,19 @@
+This addition to ngsolve allows to couple it with the boundary element library BEM++ ( www.bempp.org ).
+It provides both a C++ interface to do so, as well as a python module.
+
+Building:
+To build this library, make sure you have compiled NGsolve with MPI support enabled.
+This is requiread as recent versions of BEM++ link to MPI.
+To build the module you can do the usual
+
+mkdir build
+cd build 
+cmake ..
+make
+
+
+sequence of commands. This will generate the c++ library as libngbem.so and the python module can be found in
+build/python_package. Make sure the latter  directoriy is in your PYTHONPATH when attempting to use it.
+
+An example of how to solve the laplace equation on R^d using a Johnson-Nedelec type FEM-BEM coupling
+can be found in example.py

@@ -12,6 +12,8 @@ make
 sequence of commands. This will generate the c++ library as libngbem.so and the python module can be found in
 build/python_package. Make sure the latter  directoriy is in your PYTHONPATH when attempting to use it.
 
+In order to direct cmake to the correct version of BEM++, you can use the -DBempp_DIR="dir" flag.
+
 If you encounter errors regarding mpi,  make sure you have compiled NGsolve with MPI support enabled.
 This is required as all recent versions of BEM++ link to MPI, whith may cause problems.
 

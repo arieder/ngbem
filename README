@@ -1,7 +1,14 @@
 This addition to ngsolve allows to couple it with the boundary element library BEM++ ( www.bempp.org ).
-It provides both a C++ interface to do so, as well as a python module.
 
-Building:
+The toplevel module both a C++ interface to do so, as well as a python module, allowing to
+couple H1-ngsolve spaces of arbitrary order to piecewiese polynomial BEM++ spaces.
+
+Alternatively, there exists a pure python version of the coupling code, which can be found in the "simple",
+directory. It's api closely follows the FENICS interface provided by BEM++ and it can be used without
+compiling a C++ module. The main drawback is, that it only allows first order discretizations.
+
+
+Building the C++ part:
 To build the module you can do the usual
 
 mkdir build

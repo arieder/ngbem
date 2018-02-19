@@ -1,5 +1,5 @@
 
-# We begin by importing Dolfin, the FEniCS python library, Bempp and NumPy.
+# We begin by importing Dolfin, the ngsolve python library, Bempp and NumPy.
 
 # In[1]:
 

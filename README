@@ -5,7 +5,9 @@ couple H1-ngsolve spaces of arbitrary order to piecewiese polynomial BEM++ space
 
 Alternatively, there exists a pure python version of the coupling code, which can be found in the "simple",
 directory. It's api closely follows the FENICS interface provided by BEM++ and it can be used without
-compiling a C++ module. The main drawback is, that it only allows first order discretizations.
+compiling a C++ module. The main drawback is, that it only allows first order discretizations. 
+An example of how to use the module can be found in simple/example.py and simple/simple_helmholtz_fem_bem_coupling.py.
+
 
 
 Building the C++ part:

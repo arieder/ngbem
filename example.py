@@ -14,7 +14,7 @@ mesh = Mesh(geo.GenerateMesh(maxh=1))
 Draw(mesh);
 
 import ngbem;
-order=3;
+order=4;
 V=H1(mesh,order=order)
 u = GridFunction (V)
 
@@ -57,7 +57,7 @@ import scipy;
 
 
 
-bempp.api.global_parameters.hmat.eps=1E-05;
+bempp.api.global_parameters.hmat.eps=1E-06;
 bempp.api.global_parameters.hmat.max_rank=2048;
 
 

@@ -9,11 +9,12 @@ geo.Add (cube)
 
 from  ngsolve import *;
 
+
 mesh = Mesh(geo.GenerateMesh(maxh=1))
 
 Draw(mesh);
 
-import ngbem;
+import pyngbem;
 order=3;
 V=H1(mesh,order=order)
 u = GridFunction (V)
@@ -28,19 +29,17 @@ f = LinearForm (V)
 a = BilinearForm (V)
 a += Laplace (1)
 
-
-###a bilinear form which is only used for preconditioning
 b= BilinearForm(V);
 b += Laplace (1)
 b += Mass(1);
 
-c = Preconditioner(b, type="multigrid");
+c = Preconditioner(b, type="multigrid", flags= { "smoother" : "block" , "blocktype" : 7 , "inversetype" : "sparsecholesky"});
 
 a.Assemble()
 b.Assemble()
 #c.Update();
 #refine multiple times
-for j in range(0,3):
+for j in range(0,2):
     mesh.Refine()
     V.Update();
     a.Assemble();
@@ -55,25 +54,24 @@ import bempp.api;
 import numpy as np;
 import scipy;
 
+bempp.api.global_parameters.hmat.eps=1E-09;
+bempp.api.global_parameters.quadrature.double_singular += order + 2
+bempp.api.global_parameters.quadrature.near.double_order += order + 2
+bempp.api.global_parameters.quadrature.medium.double_order += order + 2
+bempp.api.global_parameters.quadrature.far.double_order += order + 2
+bempp.api.global_parameters.quadrature.near.single_order += order + 2
+bempp.api.global_parameters.quadrature.medium.single_order += order + 2
+bempp.api.global_parameters.quadrature.far.single_order += order + 2
 
-
-bempp.api.global_parameters.hmat.eps=1E-05;
 bempp.api.global_parameters.hmat.max_rank=2048;
-
-
-#increase the quadrature order. Otherwise higher order does not work
-bempp.api.global_parameters.quadrature.double_singular += order
-bempp.api.global_parameters.quadrature.near.double_order += order
-bempp.api.global_parameters.quadrature.medium.double_order += order
-bempp.api.global_parameters.quadrature.far.double_order += order
-bempp.api.global_parameters.quadrature.near.single_order += order
-bempp.api.global_parameters.quadrature.medium.single_order += order
-bempp.api.global_parameters.quadrature.far.single_order += order
-
+#bempp.api.global_parameters.assembly.boundary_operator_assembly_type='dense'
+bempp.api.enable_console_logging();
 
 #set up the BEM spaces
-[bem_c,trace_matrix]=ngbem.H1_trace(V);
-bem_dc=bempp.api.function_space(bem_c.grid,'DP',order-1);
+bem_grid=pyngbem.bempp_grid_from_ng(mesh)
+
+bem_c=pyngbem.space.trace_space(bem_grid,'P',V);
+bem_dc=bempp.api.function_space(bem_grid,'DP',order-1);
 
 
 ##the exact solution is exp(x)*sin(y) on the interior and 1/r on the exterior domain
@@ -88,11 +86,6 @@ def neumann_fun(x,n,domain_index,result):
     result[0]=exp(x[0])*sin(x[1])*n[0] + exp(x[0])*cos(x[1])*n[1]+( 1/( r*r*r ) )*( np.dot(x,n) );
 
 
-
-
-
-print("assembling the boundary operators")
-
 ##set up the bem
 sl=bempp.api.operators.boundary.laplace.single_layer(bem_dc,bem_c,bem_dc)
 dl=bempp.api.operators.boundary.laplace.double_layer(bem_c,bem_c,bem_dc)
@@ -101,14 +94,12 @@ id_op2=bempp.api.operators.boundary.sparse.identity(bem_c,bem_c,bem_dc)
 
 
 block=np.ndarray([2,2],dtype=np.object);
-block[0,0]=ngbem.NgOperator(a);
-block[0,1]=-trace_matrix.T * id_op.weak_form().sparse_operator;
+block[0,0]=pyngbem.NgBlock(a);
+block[0,1]=pyngbem.BemppBlock(-id_op);
 
-from scipy.sparse.linalg.interface import LinearOperator
 
-trace_op = LinearOperator(trace_matrix.shape, lambda x:trace_matrix*x)
 rhs_op1=0.5*id_op2 - dl;
-block[1,0]=rhs_op1.weak_form()*trace_op;
+block[1,0]=pyngbem.BemppBlock(rhs_op1 );
 block[1,1]=sl.weak_form();
 blockOp=bempp.api.BlockedDiscreteOperator(block);
 
@@ -116,7 +107,7 @@ blockOp=bempp.api.BlockedDiscreteOperator(block);
 
 #set up a block-diagonal preconditioner
 p_block=np.ndarray([2,2],dtype=np.object);
-p_block[0,0]=ngbem.NgOperator(c,a);
+p_block[0,0]=pyngbem.NgBlock(c,a);
 p_block[1,1]= bempp.api.InverseSparseDiscreteBoundaryOperator(
         bempp.api.operators.boundary.sparse.identity(bem_dc, bem_dc, bem_dc).weak_form())#np.identity(bem_dc.global_dof_count)
 
@@ -136,9 +127,9 @@ g=rhs_op1*dirichlet_data
 
 
 F[V.ndof:]=g.projections(bem_dc);
+ngmap=bem_c.bempp_to_ng_map();
 
-
-F[0:V.ndof]+=trace_matrix.T * neumann_data.projections(bem_c);
+F[ngmap]+=neumann_data.projections(bem_c);
 
 
 # Create a callback function to count the number of iterations
@@ -148,7 +139,7 @@ def count_iterations(x):
     it_count += 1
 
 print("solving..:")
-ux,info = scipy.sparse.linalg.gmres(blockOp, F,tol=1E-09,restart=2000, callback=count_iterations, M=p_blockOp);
+ux,info = scipy.sparse.linalg.gmres(blockOp, F,tol=1E-09,restart=5000, callback=count_iterations, M=p_blockOp);
 
 print("solving took", it_count, "iterations")
 

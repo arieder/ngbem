@@ -53,33 +53,10 @@ def surface_mesh_from_ng(mesh,domainIndex=0):
 
 
 
-def p1_dof_to_vertex_matrix(space):
-    """Map from dofs to grid insertion vertex indices."""
-    import numpy as np
 
-    from scipy.sparse import coo_matrix
-
-    grid = space.grid
-    vertex_count = space.global_dof_count
-
-    vertex_to_dof_map = np.zeros(vertex_count, dtype=np.int)
-
-    for element in grid.leaf_view.entity_iterator(0):
-        global_dofs = space.get_global_dofs(element)
-        for ind, vertex in enumerate(element.sub_entity_iterator(2)):
-            vertex_to_dof_map[grid.vertex_insertion_index(vertex)] = \
-                global_dofs[ind]
-
-    vertex_indices = np.arange(vertex_count)
-    data = np.ones(vertex_count)
-    return coo_matrix(
-        (data, (vertex_indices, vertex_to_dof_map)), dtype='float64').tocsc()
-
-#pylint: disable=too-many-locals
-
-def p1_trace(ng_space):
+def H1_trace(ng_space):
     """
-    Return the P1 trace operator.
+    Return the H^1-trace operator.
 
     This function returns a pair (space, trace_matrix),
     where space is a BEM++ space object and trace_matrix is the corresponding
@@ -90,16 +67,14 @@ def p1_trace(ng_space):
     import ngsolve as ngs;
 
 
-    if(ng_space.globalorder != 1):
-        raise ValueError("ng_space must be a p1 H1 space")
+    if(ng_space.type != 'h1ho'):
+        raise ValueError("ng_space must be a valid H1 space")
 
     import ngsolve as ngs;
-    from bempp.api import function_space, grid_from_element_data
+    from bempp.api import function_space, grid_from_element_data, ALL
     import numpy as np
 
     mesh = ng_space.mesh;
-
-    [bm_coords,bm_cells, domain_indices, bm_nodes] = surface_mesh_from_ng(mesh);
 
     [bm_coords,bm_cells,domain_indices,bm_nodes] = surface_mesh_from_ng(mesh);
 
@@ -107,48 +82,107 @@ def p1_trace(ng_space):
         bm_coords, bm_cells,domain_indices)
 
     # First get trace space
-    space = function_space(bempp_boundary_grid, "P", 1)
+    space = function_space(bempp_boundary_grid, "P", ng_space.globalorder)
 
     # Now compute the mapping from NGSolve dofs to BEM++ dofs.
+    bem_elements = list(bempp_boundary_grid.leaf_view.entity_iterator(0))
 
-    # First the BEM++ dofs from the boundary vertices
-    from scipy.sparse import coo_matrix
-    bempp_dofs_from_b_vertices = p1_dof_to_vertex_matrix(space).transpose()
+    n_bem=space.global_dof_count;
+    n_ng=ng_space.ndof;
 
-
-    nsv=len(bm_nodes)
-    # Now NGSolve vertices to boundary dofs
-    b_vertices_from_vertices = coo_matrix(
-        (np.ones(nsv), (np.arange(nsv), bm_nodes)),
-        shape=(len(bm_nodes), mesh.nv),
-        dtype='float64').tocsc()
+    k=ng_space.globalorder
+    nd=int((k+1)*(k+2)/2) ##number of degrees of freedom on the reference element
 
 
-    # Finally NGSolve dofs to vertices.
-    dofmap=np.zeros([ng_space.ndof],dtype='int64')
+    #setup the lagrange interpolation points for the BEM++ local basis
+    eval_pts=np.zeros([2,nd]);
+    pt_id=0;
+    for j in range(0,k+1):
+        yi=j/k;
+        for i in range(0,k-j+1):
+            xi=i/k;
+            eval_pts[:,pt_id]=[xi,yi];
+            pt_id+=1;
+
+
+
+    local_bem_to_ng=np.zeros([nd,nd]);
+
+    ngshape=ngs.H1FE(ngs.TRIG,ng_space.globalorder)
+    leaf=space.grid.leaf_view;
+    el0=leaf.element_from_index(0);
+
+
+    #NGSolve and BEM++ use a different reference element.
+    #The map TA x + b does this transformatuib
+    TA=np.asarray([[-1, -1], [1, 0]]);
+    Tb=np.asarray([1, 0]);
+
+    #evaluate the NGSolve basis in the Lagrange points to get coefficients of the local transformation
+    for j in range(0,nd):
+        tx=TA.dot(eval_pts[:,j])+Tb;
+        uj=ngshape.CalcShape(tx[0],tx[1],0);
+        local_bem_to_ng[:,j]=uj;
+
+
+    local_trafo=(local_bem_to_ng); #np.linalg.inv
+
+
+
+    todo=np.ones([n_bem]); #stores  which indices we already visited
+
+    iis=np.zeros([nd*n_bem],dtype=np.int64);
+    ijs=np.zeros([nd*n_bem],dtype=np.int64);
+    data=np.zeros([nd*n_bem]);
+
+    elId=0;
+
+    idCnt=0;
+    #on each element, we map from ngsolve to the reference element,
+    #do the local transformation there and then transform back to the global BEM++ dofs
     for el in ng_space.Elements(ngs.BND):
-        dofs=el.dofs
-        vs=el.vertices
-        dofmap[dofs]=[vs[j].nr for j in range(0,len(vs))];
+        bem_el=bem_elements[elId];
+        ng_dofs=el.dofs
+
+        local_ndofs=len(ng_dofs)
+
+        bem_global_dofs, bem_weights = space.get_global_dofs(bem_el, dof_weights=True)
+
+        ng_weights=np.ones(len(ng_dofs));
+
+        assert(len(bem_global_dofs) == len(ng_dofs));
+
+        for i in range(0,local_ndofs):
+            gbid=bem_global_dofs[i];
+            if(todo[gbid]==1): ##we havent dealt with this index before
+                for j in range(0,local_ndofs):
+                    gngid=ng_dofs[j];
+                    iis[idCnt]=gbid;
+                    ijs[idCnt]=gngid;
+                    data[idCnt]=bem_weights[i]*local_trafo[j,i];
+
+                    idCnt+=1;
+                todo[gbid]-=1;
+
+
+        elId+=1;
 
 
 
-    vertices_from_ngs_dofs = coo_matrix(
-        (np.ones(mesh.nv),
-         (dofmap, np.arange(
-             mesh.nv))),
-        shape=(mesh.nv, mesh.nv),
-        dtype='float64').tocsc()
+    assert(np.count_nonzero(todo)==0)
+    assert(idCnt==nd*n_bem)
 
-    # Get trace matrix by multiplication
-    trace_matrix = bempp_dofs_from_b_vertices * \
-        b_vertices_from_vertices * vertices_from_ngs_dofs
+    # build up the sparse matrix containing our transformation
+    from scipy.sparse import coo_matrix
+
+    trace_matrix=coo_matrix((data,(iis,ijs)),shape=(space.global_dof_count,ng_space.ndof));
 
     # Now return everything
     return space, trace_matrix
 
 
 from scipy.sparse.linalg.interface import LinearOperator as _LinearOperator
+
 
 class NgOperator(_LinearOperator):
     """provides a LinearOperator interface for NGSolves BilinearForm"""

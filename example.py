@@ -14,7 +14,7 @@ mesh = Mesh(geo.GenerateMesh(maxh=1))
 Draw(mesh);
 
 import ngbem;
-order=4;
+order=5;
 V=H1(mesh,order=order)
 u = GridFunction (V)
 
@@ -32,7 +32,7 @@ a += Laplace (1)
 ###a bilinear form which is only used for preconditioning
 b= BilinearForm(V);
 b += Laplace (1)
-b += Mass(1);
+b += Mass(0.1);
 
 c = Preconditioner(b, type="multigrid");
 
@@ -40,7 +40,7 @@ a.Assemble()
 b.Assemble()
 #c.Update();
 #refine multiple times
-for j in range(0,3):
+for j in range(0,1):
     mesh.Refine()
     V.Update();
     a.Assemble();
@@ -57,18 +57,20 @@ import scipy;
 
 
 
-bempp.api.global_parameters.hmat.eps=1E-06;
-bempp.api.global_parameters.hmat.max_rank=2048;
+bempp.api.global_parameters.hmat.eps=1E-08;
+bempp.api.global_parameters.hmat.max_rank=4096;
 
 
 #increase the quadrature order. Otherwise higher order does not work
-bempp.api.global_parameters.quadrature.double_singular += order
-bempp.api.global_parameters.quadrature.near.double_order += order
-bempp.api.global_parameters.quadrature.medium.double_order += order
-bempp.api.global_parameters.quadrature.far.double_order += order
-bempp.api.global_parameters.quadrature.near.single_order += order
-bempp.api.global_parameters.quadrature.medium.single_order += order
-bempp.api.global_parameters.quadrature.far.single_order += order
+
+p_inc=order+1;
+bempp.api.global_parameters.quadrature.double_singular += p_inc
+bempp.api.global_parameters.quadrature.near.double_order += p_inc
+bempp.api.global_parameters.quadrature.medium.double_order += p_inc
+bempp.api.global_parameters.quadrature.far.double_order += p_inc
+bempp.api.global_parameters.quadrature.near.single_order += p_inc
+bempp.api.global_parameters.quadrature.medium.single_order += p_inc
+bempp.api.global_parameters.quadrature.far.single_order +=  p_inc
 
 
 #set up the BEM spaces
@@ -148,7 +150,7 @@ def count_iterations(x):
     it_count += 1
 
 print("solving..:")
-ux,info = scipy.sparse.linalg.gmres(blockOp, F,tol=1E-09,restart=2000, callback=count_iterations, M=p_blockOp);
+ux,info = scipy.sparse.linalg.gmres(blockOp, F,tol=1E-12,restart=2000, callback=count_iterations, M=p_blockOp);
 
 print("solving took", it_count, "iterations")
 
@@ -171,5 +173,5 @@ Draw (u)
 Draw(disp)
 Redraw();
 
-intOrder=max(2*order+1,5);
-print ("err-u:   ", sqrt(Integrate( (uex-u)*(uex-u),mesh,order=intOrder))/sqrt(Integrate(uex*uex,mesh,order=intOrder)))
+intOrder=max(2*order+2,5);
+print ("err-u:   ", sqrt(Integrate( (uex-u)*(uex-u),mesh,order=intOrder))) #/sqrt(Integrate(uex*uex,mesh,order=intOrder)))

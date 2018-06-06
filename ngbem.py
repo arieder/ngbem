@@ -91,6 +91,7 @@ def H1_trace(ng_space):
     n_ng=ng_space.ndof;
 
     k=ng_space.globalorder
+    print("doing order ",k);
     nd=int((k+1)*(k+2)/2) ##number of degrees of freedom on the reference element
 
 
@@ -104,29 +105,20 @@ def H1_trace(ng_space):
             eval_pts[:,pt_id]=[xi,yi];
             pt_id+=1;
 
-
-
-    local_bem_to_ng=np.zeros([nd,nd]);
-
-    ngshape=ngs.H1FE(ngs.TRIG,ng_space.globalorder)
     leaf=space.grid.leaf_view;
     el0=leaf.element_from_index(0);
 
+    bem_shape=space.shapeset(el0);
+    vj=bem_shape.evaluate(eval_pts,ALL)
+    print("error due to eval",np.linalg.norm(vj-np.eye(nd)));
+
+
+    local_bem_to_ng=np.zeros([nd,nd]);
 
     #NGSolve and BEM++ use a different reference element.
     #The map TA x + b does this transformatuib
     TA=np.asarray([[-1, -1], [1, 0]]);
     Tb=np.asarray([1, 0]);
-
-    #evaluate the NGSolve basis in the Lagrange points to get coefficients of the local transformation
-    for j in range(0,nd):
-        tx=TA.dot(eval_pts[:,j])+Tb;
-        uj=ngshape.CalcShape(tx[0],tx[1],0);
-        local_bem_to_ng[:,j]=uj;
-
-
-    local_trafo=(local_bem_to_ng); #np.linalg.inv
-
 
 
     todo=np.ones([n_bem]); #stores  which indices we already visited
@@ -144,7 +136,21 @@ def H1_trace(ng_space):
         bem_el=bem_elements[elId];
         ng_dofs=el.dofs
 
+        ngshape=ng_space.GetFE(ngs.ElementId(el));
+
+
+        #evaluate the NGSolve basis in the Lagrange points to get coefficients of the local transformation
+        for j in range(0,nd):
+            tx=TA.dot(eval_pts[:,j])+Tb;
+            uj=ngshape.CalcShape(tx[0],tx[1],0);
+            local_bem_to_ng[:,j]=uj;
+
+
+        local_trafo=(local_bem_to_ng);
+
+
         local_ndofs=len(ng_dofs)
+        assert(nd==local_ndofs)
 
         bem_global_dofs, bem_weights = space.get_global_dofs(bem_el, dof_weights=True)
 

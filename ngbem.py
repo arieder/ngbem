@@ -192,25 +192,28 @@ from scipy.sparse.linalg.interface import LinearOperator as _LinearOperator
 
 class NgOperator(_LinearOperator):
     """provides a LinearOperator interface for NGSolves BilinearForm"""
-    def __init__(self, blf, blf2=None):
+    def __init__(self, blf, blf2=None, isComplex=False):
+        from ngsolve import BaseVector;
         """blf...the bilinear form to be applied,
         blf2 (optional)... a bilinear form of the same shape as blf,  useful if blf doesn't implement height and width"""
-
-
         self.blf=blf;
         if(blf2==None):
-            self.tmp1 = blf.mat.CreateColVector();
-            self.tmp2 = blf.mat.CreateColVector();
+            self.tmp1 = BaseVector(blf.mat.width, isComplex);
+            self.tmp2 = BaseVector(blf.mat.width, isComplex);
         else:
-            self.tmp1 = blf2.mat.CreateColVector();
-            self.tmp2 = blf2.mat.CreateColVector();
+            self.tmp1 = BaseVector(blf2.mat.width, isComplex);
+            self.tmp2 = BaseVector(blf2.mat.width, isComplex);
         self.shape=(blf.mat.height,blf.mat.width)
+
         self.dtype=self.tmp1.FV().NumPy().dtype;
+        print("dtype=",self.dtype)
+
 
     def _matvec(self,v):
         import numpy as np
         self.tmp1.FV().NumPy()[:] = v.reshape(v.shape[0]);
-        self.tmp2.data = self.blf.mat * self.tmp1
+        self.blf.mat.Mult(self.tmp1,self.tmp2);
+
         return self.tmp2.FV().NumPy()
     def _matmat(self,vec):
         print('matmat not implemented')

@@ -40,7 +40,7 @@ a.Assemble()
 b.Assemble()
 #c.Update();
 #refine multiple times
-for j in range(0,1):
+for j in range(0,2):
     mesh.Refine()
     V.Update();
     a.Assemble();
@@ -57,13 +57,13 @@ import scipy;
 
 
 
-bempp.api.global_parameters.hmat.eps=1E-08;
+bempp.api.global_parameters.hmat.eps=1E-09;
 bempp.api.global_parameters.hmat.max_rank=4096;
 
 
 #increase the quadrature order. Otherwise higher order does not work
 
-p_inc=order+1;
+p_inc=order+2;
 bempp.api.global_parameters.quadrature.double_singular += p_inc
 bempp.api.global_parameters.quadrature.near.double_order += p_inc
 bempp.api.global_parameters.quadrature.medium.double_order += p_inc

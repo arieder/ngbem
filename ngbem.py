@@ -52,6 +52,15 @@ def surface_mesh_from_ng(mesh,domainIndex=0):
     return [vertices,elements,domain_indices, surfaceNodeToNode[0:nv]]
 
 
+def bempp_grid_from_ng(mesh,domainIndex=0):
+    from bempp.api import grid_from_element_data
+    [bm_coords,bm_cells,domain_indices,bm_nodes] = surface_mesh_from_ng(mesh)
+
+    bempp_boundary_grid = grid_from_element_data(
+        bm_coords, bm_cells,domain_indices)
+
+    return bempp_boundary_grid
+
 
 
 def H1_trace(ng_space):
@@ -223,3 +232,10 @@ class NgOperator(_LinearOperator):
         rows,cols,vals = self.blf.mat.COO()
         Acsc = sp.csc_matrix((vals,(rows,cols)))
         return Acsc;
+
+def ng_to_bempp_trace(ng_space):
+    if(ng_space.type=='h1ho'):
+        return H1_trace(ng_space)
+    elif(ng_space.type=='hcurlho'):
+        from maxwell_ngbem import HCurl_trace;
+        return HCurl_trace(ng_space)

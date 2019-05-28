@@ -2,10 +2,11 @@ This addition to ngsolve allows to couple it with the boundary element library B
 
 It is a pure python addon, which closely mimics the API of the FENics coupling provided by BEM++.
 
-The coupling only works for H1 spaces, but allows for arbitrary order.
+The coupling works for H1 spaces allowing for arbitrary order and for lowest order Nedelec spaces.
 
 
 Examples of how to use the module can be found in example.py and simple_helmholtz_fem_bem_coupling.py.
+An example for coupling for Maxwells equation can be found in maxwell_johnson_nedelec.py
 
 
 

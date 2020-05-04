@@ -47,8 +47,6 @@ def test_neumann_trace(x):
 tr_uex = bempp.api.GridFunction(bem_dc,
                                 fun=real_trace )
 
-print("huh?")
-
 print(trace_matrix.shape, "vs ",uv.vec.FV().NumPy().shape)
 coefs=trace_matrix.dot(uv.vec.FV().NumPy());
 tr_u=bempp.api.GridFunction(bem_dc,coefficients=coefs);
@@ -62,4 +60,3 @@ tr_dnu.plot();
 gfe=tr_u-tr_uex;
 print("error: ",tr_u.relative_error(test_trace))
 print("neumann error: ",tr_dnu.relative_error(test_neumann_trace))
-print("checking error: ",tr_uex.relative_error(test_trace))

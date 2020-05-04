@@ -14,7 +14,7 @@ mesh = Mesh(geo.GenerateMesh(maxh=1))
 Draw(mesh);
 
 import ngbem;
-order=5;
+order=3;
 V=H1(mesh,order=order)
 u = GridFunction (V)
 
@@ -40,7 +40,7 @@ a.Assemble()
 b.Assemble()
 #c.Update();
 #refine multiple times
-for j in range(0,2):
+for j in range(0,1):
     mesh.Refine()
     V.Update();
     a.Assemble();

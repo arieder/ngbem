@@ -65,11 +65,12 @@ for n in range(1,12):
     trace_op_adj = LinearOperator(trace_matrix.T.shape, lambda x:trace_matrix.T*x)
     grid = trace_space.grid
 
-    rt_space = bempp.api.function_space(grid,"B-RT",0)
-    nc_space = bempp.api.function_space(grid, "B-NC", 0)
+    rt_space = bempp.api.function_space(grid,"RT",0) ##why barycentric?
+    nc_space = bempp.api.function_space(grid, "NC", 0) #why barycentric
 
-    bc_space = bempp.api.function_space(grid,"BC",0)
-    rbc_space = bempp.api.function_space(grid,"RBC",0)
+    bc_space = bempp.api.function_space(grid,"RT",0)
+    #bnc_space = bempp.api.function_space(grid,"B-NC",0)
+    rbc_space = bempp.api.function_space(grid,"NC",0)
 
     fem_size = fem_space.ndof
     trace_size = rt_space.global_dof_count
@@ -82,6 +83,7 @@ for n in range(1,12):
 
     Id = bempp.api.operators.boundary.sparse.identity(bc_space,bc_space,nc_space)
 
+    Id.weak_form()
     #FEniCS
     tu = fem_space.TrialFunction();
     tv = fem_space.TestFunction();
@@ -89,9 +91,11 @@ for n in range(1,12):
     # Make right hand side
     e_inc = bempp.api.GridFunction(rt_space,dual_space=rbc_space,fun=tangential_trace)
     e_N_inc = bempp.api.GridFunction(bc_space,dual_space=nc_space,fun=neumann_trace)
+    print(1)
     f_upper = 1j*k/mu * trace_matrix.T * (Id.weak_form() * e_N_inc.coefficients)
+    print(2)
     f_lower = (.5*Id2+H).weak_form() * e_inc.coefficients
-
+    print(3)
     f_0 = np.concatenate([f_upper,f_lower])
 
     # Build BlockedLinearOperator

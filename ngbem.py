@@ -63,9 +63,10 @@ def bempp_grid_from_ng(mesh,domainIndex=0):
 
 
 
-def H1_trace(ng_space):
+def ng_surface_trace(ng_space,bempp_boundary_grid=None):
     """
-    Return the H^1-trace operator.
+    Returns the trace operator for a NGSolve FESpace exporting surface elemenets.
+    This can'be H^1 or SurfaceL2
 
     This function returns a pair (space, trace_matrix),
     where space is a BEM++ space object and trace_matrix is the corresponding
@@ -76,8 +77,8 @@ def H1_trace(ng_space):
     import ngsolve as ngs;
 
 
-    if(ng_space.type != 'h1ho'):
-        raise ValueError("ng_space must be a valid H1 space")
+    if(ng_space.type != 'h1ho' and ng_space.type!='l2surf'):
+        raise ValueError("ng_space must be a valid H1 or L2 surface space")
 
     import ngsolve as ngs;
     from bempp.api import function_space, grid_from_element_data, ALL
@@ -85,13 +86,17 @@ def H1_trace(ng_space):
 
     mesh = ng_space.mesh;
 
-    [bm_coords,bm_cells,domain_indices,bm_nodes] = surface_mesh_from_ng(mesh);
+    if(bempp_boundary_grid==None):
+        [bm_coords,bm_cells,domain_indices,bm_nodes] = surface_mesh_from_ng(mesh);
 
-    bempp_boundary_grid = grid_from_element_data(
-        bm_coords, bm_cells,domain_indices)
+        bempp_boundary_grid = grid_from_element_data(
+            bm_coords, bm_cells,domain_indices)
 
     # First get trace space
-    space = function_space(bempp_boundary_grid, "P", ng_space.globalorder)
+    if(ng_space.type=='h1ho'):
+        space = function_space(bempp_boundary_grid, "P", ng_space.globalorder)
+    else:
+        space = function_space(bempp_boundary_grid, "DP", ng_space.globalorder)
 
     # Now compute the mapping from NGSolve dofs to BEM++ dofs.
     bem_elements = list(bempp_boundary_grid.leaf_view.entity_iterator(0))
@@ -108,9 +113,15 @@ def H1_trace(ng_space):
     eval_pts=np.zeros([2,nd]);
     pt_id=0;
     for j in range(0,k+1):
-        yi=j/k;
+        if(k==0):
+            yi=0.5;
+        else:
+            yi=j/k;
         for i in range(0,k-j+1):
-            xi=i/k;
+            if(k==0):
+                xi=0.5
+            else:
+                xi=i/k;
             eval_pts[:,pt_id]=[xi,yi];
             pt_id+=1;
 
@@ -195,6 +206,41 @@ def H1_trace(ng_space):
     # Now return everything
     return space, trace_matrix
 
+def L2_trace(ng_space,bempp_boundary_grid=None,also_give_dn=False):
+    from ngsolve import FacetFESpace, SurfaceL2,comp,BND, InnerProduct, specialcf
+    if(ng_space.type != 'l2ho'):
+        raise ValueError("ng_space must be a valid L2 space")
+
+    mesh=ng_space.mesh
+    F = FacetFESpace(mesh, order=ng_space.globalorder, dirichlet=".*")
+    S = SurfaceL2(mesh, order=ng_space.globalorder)
+    E1 = comp.ConvertOperator(spacea=ng_space, spaceb=F)
+    E2 = comp.ConvertOperator(spacea=F, spaceb=S, vb=BND)
+
+    E = E2 @ E1
+
+    [bem_space, trace_matrix]=ng_surface_trace(S,bempp_boundary_grid)
+
+    if(also_give_dn):
+        V2S_1 = comp.ConvertOperator(spacea=ng_space, spaceb=F, trial_cf=InnerProduct(ng_space.TrialFunction().Deriv(), specialcf.normal(mesh.dim)))
+        V2S_2 = comp.ConvertOperator(spacea=F, spaceb=S, vb=BND)
+        EN= V2S_2 @ V2S_1
+
+        return [bem_space, trace_matrix @ to_sparse_matrix(E), trace_matrix @ to_sparse_matrix(EN)]
+    else:
+        return [bem_space, trace_matrix @ to_sparse_matrix(E)]
+        
+    
+
+def to_sparse_matrix(A):
+    rows,cols,vals = A.COO()
+    import scipy.sparse as sp
+
+    B = sp.csr_matrix((vals,(rows,cols)),shape=(A.height,A.width))
+    return B
+
+
+
 
 from scipy.sparse.linalg.interface import LinearOperator as _LinearOperator
 
@@ -233,9 +279,18 @@ class NgOperator(_LinearOperator):
         Acsc = sp.csc_matrix((vals,(rows,cols)))
         return Acsc;
 
-def ng_to_bempp_trace(ng_space):
+
+#for compatibility reasons
+def H1_trace(ng_space,bempp_surface_grid=None):
+    return ng_surface_trace(ng_space,bempp_surface_grid);
+    
+def ng_to_bempp_trace(ng_space,bempp_surface_grid=None):
     if(ng_space.type=='h1ho'):
-        return H1_trace(ng_space)
+        return H1_trace(ng_space,bempp_surface_grid)
+    if(ng_space.type=='l2ho'):
+        return L2_trace(ng_space,bempp_surface_grid)
+    elif(ng_space.type=='l2surf'):
+        return ng_surface_trace(ng_space,bempp_surface_grid);
     elif(ng_space.type=='hcurlho'):
         from maxwell_ngbem import HCurl_trace;
         return HCurl_trace(ng_space)

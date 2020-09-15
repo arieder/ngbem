@@ -2,7 +2,7 @@ import ngsolve as ngs
 import bempp.api
 import numpy as np
 
-#bempp.api.DEFAULT_DEVICE_INTERFACE="opencl"
+bempp.api.DEFAULT_DEVICE_INTERFACE="opencl"
 
 from math import pi,sqrt
 k =  1
@@ -52,7 +52,7 @@ u,v=ng_space.TnT();
 h=ngs.specialcf.mesh_size
 n=ngs.specialcf.normal(3);
 
-h0=ngs.Parameter(1)
+h0=h#ngs.Parameter(1)
 beta=b0*k*h/order
 delta=d0*k*h0/order
  
@@ -122,18 +122,18 @@ totaldofs=ng_space.ndof+ dp_space.global_dof_count + p_space.global_dof_count
 bempp.api.enable_console_logging()
 
 
-
+assembler="dense"
 
 slp_dd= bempp.api.operators.boundary.helmholtz.single_layer(
-    dp_space, p_space, dp_space, k,assembler='fmm');
-slp_cd= bempp.api.operators.boundary.helmholtz.single_layer(p_space, p_space, dp_space, k,assembler='fmm')
-slp_dc= bempp.api.operators.boundary.helmholtz.single_layer(dp_space, p_space, p_space, k,assembler='fmm')
-slp_cc= bempp.api.operators.boundary.helmholtz.single_layer(p_space, p_space, p_space, k,assembler='fmm')
+    dp_space, p_space, dp_space, k,assembler=assembler);
+slp_cd= bempp.api.operators.boundary.helmholtz.single_layer(p_space, p_space, dp_space, k,assembler=assembler)
+slp_dc= bempp.api.operators.boundary.helmholtz.single_layer(dp_space, p_space, p_space, k,assembler=assembler)
+slp_cc= bempp.api.operators.boundary.helmholtz.single_layer(p_space, p_space, p_space, k,assembler=assembler)
 
 
 
 hyp=bempp.api.operators.boundary.helmholtz.hypersingular(
-    p_space,p_space,p_space,k,assembler='fmm'); 
+    p_space,p_space,p_space,k,assembler=assembler); 
 
 M_cc=bempp.api.operators.boundary.sparse.identity( p_space, p_space,p_space)
 M_cd=bempp.api.operators.boundary.sparse.identity( p_space, p_space,dp_space)
@@ -145,17 +145,17 @@ M_dd=bempp.api.operators.boundary.sparse.identity( dp_space, p_space,dp_space)
 
 
 dlp_cd = bempp.api.operators.boundary.helmholtz.double_layer(
-    p_space, p_space, dp_space, k,assembler='fmm')
+    p_space, p_space, dp_space, k,assembler=assembler)
 
 dlp_cc = bempp.api.operators.boundary.helmholtz.double_layer(
-    p_space, p_space, p_space, k,assembler='fmm')
+    p_space, p_space, p_space, k,assembler=assembler)
 
 
 adlp_dc = bempp.api.operators.boundary.helmholtz.adjoint_double_layer(
-    dp_space, p_space, p_space, k,assembler='fmm')
+    dp_space, p_space, p_space, k,assembler=assembler)
 
 adlp_cc = bempp.api.operators.boundary.helmholtz.adjoint_double_layer(
-    p_space, p_space, p_space, k,assembler='fmm')
+    p_space, p_space, p_space, k,assembler=assembler)
 
 
 Bk=-hyp + 1j*eta*(0.5*M_cc - dlp_cc)
@@ -235,7 +235,7 @@ bem_block[1,0]=-(0.5*M_cd+dlp_cd + 1j*k*slp_cd)
 
 
 ##delta=d0*k*h/order
-weight_matrix=d0*k*h0.Get()/order; # TODO reinstate (d0*k/order)*weight_bem_function(dp_space,1);
+weight_matrix=d0*k*order*weight_bem_function(dp_space,1);
 
 weight_operator=LinearOperator(M_dd.weak_form().shape, lambda x:weight_matrix*x)
 

@@ -225,6 +225,12 @@ def L2_trace(ng_space,bempp_boundary_grid=None,also_give_dn=False,weight1=1,weig
     E = to_sparse_matrix(E2) @ to_sparse_matrix(E1)
 
 
+    #from ngsolve import  GridFunction, specialcf
+    #from ngsolve.fem import  LoggingCF
+    #gfu=GridFunction(F)
+    #gfu.Set (  LoggingCF ( specialcf.mesh_size,logfile="bla.log" ),BND )
+
+
     [bem_space, trace_matrix]=ng_surface_trace(S,bempp_boundary_grid)
 
     if(also_give_dn):
@@ -246,6 +252,54 @@ def to_sparse_matrix(A):
     return B
 
 
+def weight_bem_function(space,power):
+    import numpy as np
+
+    n_bem=space.global_dof_count
+    todo=np.ones([n_bem]); #stores  which indices we already visited                                                                                                                                                                        
+                                   
+
+    iis=np.zeros([n_bem],dtype=np.int64);
+    ijs=np.zeros([n_bem],dtype=np.int64);
+    data=np.zeros([n_bem]);
+
+    idCnt=0;
+
+    grid=space.grid
+    bem_elements = grid.elements
+    
+    for elId  in range(0,bem_elements.shape[1]):
+        bem_global_dofs =  space.local2global[elId]
+        bem_weights = space.local_multipliers[elId]
+
+        
+        corners=grid.vertices[:,bem_elements[:,elId]]
+        #midpoint=(1.0/3.0)*(corners[:,0]+corners[:,1]+corners[:,2])                                                                                                                                                                                                   bem_el.geometry.volume        
+        vol=np.linalg.norm(np.cross(corners[:,1]-corners[:,0],corners[:,2]-corners[:,0]))
+
+
+        #print("v:",elId,np.power(vol,1/2))
+        local_weight=pow(vol,0.5*power)
+        #print("hi",local_weight)
+
+        for i in range(0,len(bem_global_dofs)):
+            gbid=bem_global_dofs[i];
+
+            if(todo[gbid]==1): ##we havent dealt with this index before                                                                                                                                                                                                        
+                iis[idCnt]=gbid;
+                ijs[idCnt]=gbid;
+                #print("looK:",bem_weights,local_weight)
+                data[idCnt]=local_weight*bem_weights[i]
+
+                idCnt+=1;
+                todo[gbid]-=1;
+
+    # build up the sparse matrix containing our transformation                                                                                                                                                                                                                 
+    from scipy.sparse import coo_matrix
+
+    matrix=coo_matrix((data,(iis,ijs)),shape=(space.global_dof_count,space.global_dof_count));
+    return matrix
+    
 
 
 from scipy.sparse.linalg.interface import LinearOperator as _LinearOperator

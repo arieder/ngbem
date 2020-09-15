@@ -53,12 +53,13 @@ def surface_mesh_from_ng(mesh,domainIndex=0):
 
 
 def bempp_grid_from_ng(mesh,domainIndex=0):
-    from bempp.api import grid_from_element_data
+    #from bempp.api import grid_from_element_data
+    from bempp.api import Grid as grid_from_element_data
     [bm_coords,bm_cells,domain_indices,bm_nodes] = surface_mesh_from_ng(mesh)
 
     bempp_boundary_grid = grid_from_element_data(
         bm_coords, bm_cells,domain_indices)
-
+    
     return bempp_boundary_grid
 
 
@@ -81,7 +82,8 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None):
         raise ValueError("ng_space must be a valid H1 or L2 surface space")
 
     import ngsolve as ngs;
-    from bempp.api import function_space, grid_from_element_data, ALL
+    from bempp.api import function_space, ALL
+    from bempp.api import Grid as grid_from_element_data
     import numpy as np
 
     mesh = ng_space.mesh;
@@ -99,7 +101,7 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None):
         space = function_space(bempp_boundary_grid, "DP", ng_space.globalorder)
 
     # Now compute the mapping from NGSolve dofs to BEM++ dofs.
-    bem_elements = list(bempp_boundary_grid.leaf_view.entity_iterator(0))
+    bem_elements = bempp_boundary_grid.elements#list(bempp_boundary_grid.leaf_view.entity_iterator(0))
 
     n_bem=space.global_dof_count;
     n_ng=ng_space.ndof;
@@ -125,11 +127,11 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None):
             eval_pts[:,pt_id]=[xi,yi];
             pt_id+=1;
 
-    leaf=space.grid.leaf_view;
-    el0=leaf.element_from_index(0);
+    #leaf=space.grid.leaf_view;
+    el0=bem_elements[:,0]#leaf.element_from_index(0);
 
-    bem_shape=space.shapeset(el0);
-    vj=bem_shape.evaluate(eval_pts,ALL)
+    bem_shape=space.shapeset#(el0);
+    vj=bem_shape.evaluate(eval_pts)
     print("error due to eval",np.linalg.norm(vj-np.eye(nd)));
 
 
@@ -153,7 +155,7 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None):
     #on each element, we map from ngsolve to the reference element,
     #do the local transformation there and then transform back to the global BEM++ dofs
     for el in ng_space.Elements(ngs.BND):
-        bem_el=bem_elements[elId];
+        bem_el=bem_elements[:,elId];
         ng_dofs=el.dofs
 
         ngshape=ng_space.GetFE(ngs.ElementId(el));
@@ -172,7 +174,9 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None):
         local_ndofs=len(ng_dofs)
         assert(nd==local_ndofs)
 
-        bem_global_dofs, bem_weights = space.get_global_dofs(bem_el, dof_weights=True)
+        #bem_global_dofs, bem_weights = space.get_global_dofs(bem_el, dof_weights=True)
+        bem_global_dofs =  space.local2global[elId]
+        bem_weights = space.local_multipliers[elId]
 
         ng_weights=np.ones(len(ng_dofs));
 
@@ -206,29 +210,31 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None):
     # Now return everything
     return space, trace_matrix
 
-def L2_trace(ng_space,bempp_boundary_grid=None,also_give_dn=False):
+def L2_trace(ng_space,bempp_boundary_grid=None,also_give_dn=False,weight1=1,weight2=1):
     from ngsolve import FacetFESpace, SurfaceL2,comp,BND, InnerProduct, specialcf
     if(ng_space.type != 'l2ho'):
         raise ValueError("ng_space must be a valid L2 space")
 
     mesh=ng_space.mesh
-    F = FacetFESpace(mesh, order=ng_space.globalorder, dirichlet=".*")
-    S = SurfaceL2(mesh, order=ng_space.globalorder)
-    E1 = comp.ConvertOperator(spacea=ng_space, spaceb=F)
+    F = FacetFESpace(mesh, order=ng_space.globalorder, dirichlet=".*",complex=ng_space.is_complex)
+    S = SurfaceL2(mesh, order=ng_space.globalorder,complex=ng_space.is_complex)
+    E1 = comp.ConvertOperator(spacea=ng_space, spaceb=F,trial_cf=(weight1)*ng_space.TrialFunction())
     E2 = comp.ConvertOperator(spacea=F, spaceb=S, vb=BND)
 
-    E = E2 @ E1
+    
+    E = to_sparse_matrix(E2) @ to_sparse_matrix(E1)
+
 
     [bem_space, trace_matrix]=ng_surface_trace(S,bempp_boundary_grid)
 
     if(also_give_dn):
-        V2S_1 = comp.ConvertOperator(spacea=ng_space, spaceb=F, trial_cf=InnerProduct(ng_space.TrialFunction().Deriv(), specialcf.normal(mesh.dim)))
+        V2S_1 = comp.ConvertOperator(spacea=ng_space, spaceb=F, trial_cf=weight2*InnerProduct(ng_space.TrialFunction().Deriv(), specialcf.normal(mesh.dim)))
         V2S_2 = comp.ConvertOperator(spacea=F, spaceb=S, vb=BND)
-        EN= V2S_2 @ V2S_1
+        EN= to_sparse_matrix(V2S_2) @ to_sparse_matrix(V2S_1)
 
-        return [bem_space, trace_matrix @ to_sparse_matrix(E), trace_matrix @ to_sparse_matrix(EN)]
+        return [bem_space, trace_matrix @ E, trace_matrix @ EN]
     else:
-        return [bem_space, trace_matrix @ to_sparse_matrix(E)]
+        return [bem_space, trace_matrix @ E]
         
     
 
@@ -247,18 +253,29 @@ from scipy.sparse.linalg.interface import LinearOperator as _LinearOperator
 
 class NgOperator(_LinearOperator):
     """provides a LinearOperator interface for NGSolves BilinearForm"""
-    def __init__(self, blf, blf2=None, isComplex=False):
-        from ngsolve import BaseVector;
+    def __init__(self, blfOrMat, blf2=None, isComplex=False):
+        from ngsolve import BaseVector,BilinearForm;
         """blf...the bilinear form to be applied,
         blf2 (optional)... a bilinear form of the same shape as blf,  useful if blf doesn't implement height and width"""
-        self.blf=blf;
-        if(blf2==None):
-            self.tmp1 = BaseVector(blf.mat.width, isComplex);
-            self.tmp2 = BaseVector(blf.mat.width, isComplex);
+        if(isinstance(blfOrMat,BilinearForm)):
+            self.blf=blfOrMat;
+            self.mat=self.blf.mat
+            if(blf2==None):
+                self.tmp1 = BaseVector(self.blf.mat.width, isComplex);
+                self.tmp2 = BaseVector(self.blf.mat.width, isComplex);
+            else:
+                self.tmp1 = BaseVector(blf2.mat.width, isComplex);
+                self.tmp2 = BaseVector(blf2.mat.width, isComplex);
+            self.shape=(self.blf.mat.height,self.blf.mat.width)
         else:
-            self.tmp1 = BaseVector(blf2.mat.width, isComplex);
-            self.tmp2 = BaseVector(blf2.mat.width, isComplex);
-        self.shape=(blf.mat.height,blf.mat.width)
+            self.mat=blfOrMat;
+            if(blf2==None):
+                self.tmp1 = BaseVector(self.mat.width, isComplex);
+                self.tmp2 = BaseVector(self.mat.width, isComplex);
+            else:
+                self.tmp1 = BaseVector(blf2.mat.width, isComplex);
+                self.tmp2 = BaseVector(blf2.mat.width, isComplex);
+            self.shape=(self.mat.height,self.mat.width)
 
         self.dtype=self.tmp1.FV().NumPy().dtype;
         print("dtype=",self.dtype)
@@ -267,7 +284,7 @@ class NgOperator(_LinearOperator):
     def _matvec(self,v):
         import numpy as np
         self.tmp1.FV().NumPy()[:] = v.reshape(v.shape[0]);
-        self.blf.mat.Mult(self.tmp1,self.tmp2);
+        self.mat.Mult(self.tmp1,self.tmp2);
 
         return self.tmp2.FV().NumPy()
     def _matmat(self,vec):
@@ -275,7 +292,7 @@ class NgOperator(_LinearOperator):
 
     def tocsc(self):
         import scipy.sparse as sp
-        rows,cols,vals = self.blf.mat.COO()
+        rows,cols,vals = self.mat.COO()
         Acsc = sp.csc_matrix((vals,(rows,cols)))
         return Acsc;
 

@@ -10,7 +10,7 @@ geo1.Add(Sphere(Pnt(0,0,0),1))
 
 
 
-order=2
+order=1
 print("order= ",order)
 m1 = geo1.GenerateMesh (maxh=0.05)
 mesh = ngs.Mesh(m1)
@@ -30,17 +30,17 @@ import ngbem
 bem_dc,trace_matrix,normal_trace_matrix  = ngbem.L2_trace(L,also_give_dn=True)
 print("building traces complete")
 
+import numpy as np;    
+@bempp.api.real_callable
 def real_trace(x, n, domain_index, result):
-    import numpy as np;    
-    result[:] = sqrt(x[0]**2+x[1]**2+x[2]**2)
+    result[:] = np.sqrt(x[0]**2+x[1]**2+x[2]**2)
+
 
 def test_trace(x):
-    import numpy as np;    
-    return sqrt(x[0]**2+x[1]**2+x[2]**2)
+    return np.sqrt(x[0]**2+x[1]**2+x[2]**2)
 
-
+import numpy as np;
 def test_neumann_trace(x):
-    import numpy as np;    
     return 1
 
 

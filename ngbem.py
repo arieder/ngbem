@@ -1,9 +1,12 @@
 """Implement the mapping from NGSolve P1 to BEM++ P1 functions."""
 
-def surface_mesh_from_ng(mesh,domainIndex=0):
+def surface_mesh_from_ng(mesh,bembnd=None):
     import numpy as np;
     import ngsolve as ngs;
 
+    if bembnd is None:
+        bembnd = mesh.Boundaries(".*")
+    mask = bembnd.Mask()
 
     nv=mesh.nv
     nse=mesh.GetNE(ngs.BND)
@@ -18,6 +21,7 @@ def surface_mesh_from_ng(mesh,domainIndex=0):
 
     #extract surface vertices
     for se in mesh.Elements(ngs.BND):
+      if mask[se.index]:
         for vert in se.vertices:
             if(nodeToSurfaceNode[vert.nr] == -1): #found one we hadnt before
                 nodeToSurfaceNode[vert.nr]=surfaceNodeIdx;
@@ -41,6 +45,7 @@ def surface_mesh_from_ng(mesh,domainIndex=0):
     elements=np.zeros([3,nse],dtype=np.int);
     i=0;
     for el in mesh.Elements(ngs.BND):
+      if mask[se.index]:        
         j=0;
         domain_indices[i]=el.index;
         for p in el.vertices:
@@ -48,14 +53,20 @@ def surface_mesh_from_ng(mesh,domainIndex=0):
             j+=1;
         i+=1;
 
-
+    # filter only valid els, should be done from the beginning
+    els2 = []
+    for i in range(nse):
+        if elements[0,i] >= 0:
+            els2.append( (elements[0,i], elements[1,i], elements[2,i]) )
+    elements = np.array(list(zip(*els2)))
+    
     return [vertices,elements,domain_indices, surfaceNodeToNode[0:nv]]
 
 
-def bempp_grid_from_ng(mesh,domainIndex=0):
+def bempp_grid_from_ng(mesh,bembnd=None):
     #from bempp.api import grid_from_element_data
     from bempp.api import Grid as grid_from_element_data
-    [bm_coords,bm_cells,domain_indices,bm_nodes] = surface_mesh_from_ng(mesh)
+    [bm_coords,bm_cells,domain_indices,bm_nodes] = surface_mesh_from_ng(mesh, bembnd)
 
     bempp_boundary_grid = grid_from_element_data(
         bm_coords, bm_cells,domain_indices)
@@ -64,7 +75,7 @@ def bempp_grid_from_ng(mesh,domainIndex=0):
 
 
 
-def ng_surface_trace(ng_space,bempp_boundary_grid=None):
+def ng_surface_trace(ng_space,bempp_boundary_grid=None, bembnd=None):
     """
     Returns the trace operator for a NGSolve FESpace exporting surface elemenets.
     This can'be H^1 or SurfaceL2
@@ -87,10 +98,12 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None):
     import numpy as np
 
     mesh = ng_space.mesh;
+    if bembnd is None:
+        bembnd = mesh.Boundaries(".*")
+    mask = bembnd.Mask()
 
     if(bempp_boundary_grid==None):
-        [bm_coords,bm_cells,domain_indices,bm_nodes] = surface_mesh_from_ng(mesh);
-
+        [bm_coords,bm_cells,domain_indices,bm_nodes] = surface_mesh_from_ng(mesh, bembnd);
         bempp_boundary_grid = grid_from_element_data(
             bm_coords, bm_cells,domain_indices)
 
@@ -155,6 +168,7 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None):
     #on each element, we map from ngsolve to the reference element,
     #do the local transformation there and then transform back to the global BEM++ dofs
     for el in ng_space.Elements(ngs.BND):
+      if mask[el.index]:
         bem_el=bem_elements[:,elId];
         ng_dofs=el.dofs
 
@@ -352,16 +366,16 @@ class NgOperator(_LinearOperator):
 
 
 #for compatibility reasons
-def H1_trace(ng_space,bempp_surface_grid=None):
-    return ng_surface_trace(ng_space,bempp_surface_grid);
+def H1_trace(ng_space,bempp_surface_grid=None, bembnd=None):
+    return ng_surface_trace(ng_space,bempp_surface_grid, bembnd);
     
-def ng_to_bempp_trace(ng_space,bempp_surface_grid=None):
+def ng_to_bempp_trace(ng_space,bempp_surface_grid=None, bembnd=None):
     if(ng_space.type=='h1ho'):
-        return H1_trace(ng_space,bempp_surface_grid)
+        return H1_trace(ng_space,bempp_surface_grid, bembnd)
     if(ng_space.type=='l2ho'):
-        return L2_trace(ng_space,bempp_surface_grid)
+        return L2_trace(ng_space,bempp_surface_grid, bembnd)
     elif(ng_space.type=='l2surf'):
-        return ng_surface_trace(ng_space,bempp_surface_grid);
+        return ng_surface_trace(ng_space,bempp_surface_grid, bembnd);
     elif(ng_space.type=='hcurlho'):
         from maxwell_ngbem import HCurl_trace;
         return HCurl_trace(ng_space)

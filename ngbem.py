@@ -11,54 +11,62 @@ def surface_mesh_from_ng(mesh,bembnd=None):
     nv=mesh.nv
     nse=mesh.GetNE(ngs.BND)
 
-    surfaceNodeToNode=np.zeros(nv,np.int)
-    nodeToSurfaceNode=np.zeros(nv,np.int)
-
-    surfaceNodeToNode.fill(-1)
-    nodeToSurfaceNode.fill(-1)
+    surfaceNodeToNode=np.full(nv,-1,np.int)
+    nodeToSurfaceNode=np.full(nv,-1,np.int)
 
     surfaceNodeIdx=0
 
     #extract surface vertices
+    pnts = []
+    els = []
+    dominds = []
     for se in mesh.Elements(ngs.BND):
-      if mask[se.index]:
-        for vert in se.vertices:
-            if(nodeToSurfaceNode[vert.nr] == -1): #found one we hadnt before
-                nodeToSurfaceNode[vert.nr]=surfaceNodeIdx;
-                surfaceNodeToNode[surfaceNodeIdx]=vert.nr;
+        if mask[se.index]:
+            for vert in se.vertices:
+                if(nodeToSurfaceNode[vert.nr] == -1): #found one we hadnt before
+                    nodeToSurfaceNode[vert.nr]=surfaceNodeIdx;
+                    surfaceNodeToNode[surfaceNodeIdx]=vert.nr;
+                
+                    surfaceNodeIdx+=1;
+                    pnts.append (mesh[vert].point)
 
-                surfaceNodeIdx+=1;
+            els.append ( [nodeToSurfaceNode[v.nr] for v in se.vertices] )
+            dominds.append(se.index)
 
 
     #forget about the non-surface vertices
     nv=surfaceNodeIdx;
     print("got ",nv," surface vertices")
-    vertices=np.ndarray([3,nv],dtype=np.float64);
+    # vertices=np.ndarray([3,nv],dtype=np.float64);
 
-    ngmesh = mesh.ngmesh
-    from netgen.meshing import PointId
-    for i in range(0,nv):
-        ngp=ngmesh.Points()[PointId(surfaceNodeToNode[i]+1)];
-        vertices[:,i]=ngp.p
+    # ngmesh = mesh.ngmesh
+    # from netgen.meshing import PointId
+    # for i in range(0,nv):
+    #     ngp=ngmesh.Points()[PointId(surfaceNodeToNode[i]+1)];
+    #     vertices[:,i]=ngp.p
 
-    domain_indices=np.zeros([nse],dtype=np.int);
-    elements=np.zeros([3,nse],dtype=np.int);
-    i=0;
-    for el in mesh.Elements(ngs.BND):
-      if mask[se.index]:        
-        j=0;
-        domain_indices[i]=el.index;
-        for p in el.vertices:
-            elements[j,i]=nodeToSurfaceNode[p.nr]
-            j+=1;
-        i+=1;
+    vertices = np.array(list( zip(*pnts) ))
+
+    
+    # domain_indices=np.zeros([nse],dtype=np.int);
+    # elements=np.zeros([3,nse],dtype=np.int);
+    # i=0;
+    # for el in mesh.Elements(ngs.BND):
+    #   if mask[se.index]:        
+    #     j=0;
+    #     domain_indices[i]=el.index;
+    #     for p in el.vertices:
+    #         elements[j,i]=nodeToSurfaceNode[p.nr]
+    #         j+=1;
+    #     i+=1;
 
     # filter only valid els, should be done from the beginning
-    els2 = []
-    for i in range(nse):
-        if elements[0,i] >= 0:
-            els2.append( (elements[0,i], elements[1,i], elements[2,i]) )
-    elements = np.array(list(zip(*els2)))
+    # els2 = []
+    # for i in range(nse):
+    # if elements[0,i] >= 0:
+    # els2.append( (elements[0,i], elements[1,i], elements[2,i]) )
+    elements = np.array(list(zip(*els)))
+    domain_indices = np.array(dominds, dtype=np.int)
     
     return [vertices,elements,domain_indices, surfaceNodeToNode[0:nv]]
 
@@ -89,7 +97,8 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None, bembnd=None):
     import ngsolve as ngs;
 
 
-    if(ng_space.type != 'h1ho' and ng_space.type!='l2surf'):
+    # if(ng_space.type != 'h1ho' and ng_space.type!='l2surf'):
+    if ng_space.type not in ['h1ho', 'l2surf', 'wrapped-l2surf']:
         raise ValueError("ng_space must be a valid H1 or L2 surface space")
 
     import ngsolve as ngs;
@@ -374,7 +383,7 @@ def ng_to_bempp_trace(ng_space,bempp_surface_grid=None, bembnd=None):
         return H1_trace(ng_space,bempp_surface_grid, bembnd)
     if(ng_space.type=='l2ho'):
         return L2_trace(ng_space,bempp_surface_grid, bembnd)
-    elif(ng_space.type=='l2surf'):
+    elif(ng_space.type=='l2surf' or ng_space.type=='wrapped-l2surf'):
         return ng_surface_trace(ng_space,bempp_surface_grid, bembnd);
     elif(ng_space.type=='hcurlho'):
         from maxwell_ngbem import HCurl_trace;

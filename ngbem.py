@@ -20,8 +20,9 @@ def surface_mesh_from_ng(mesh,bembnd=None):
     pnts = []
     els = []
     dominds = []
-    for se in mesh.Elements(ngs.BND):
-        if mask[se.index]:
+    # for se in mesh.Elements(ngs.BND):
+    # if mask[se.index]:
+    for se in bembnd.Elements():
             for vert in se.vertices:
                 if(nodeToSurfaceNode[vert.nr] == -1): #found one we hadnt before
                     nodeToSurfaceNode[vert.nr]=surfaceNodeIdx;
@@ -176,12 +177,13 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None, bembnd=None):
     idCnt=0;
     #on each element, we map from ngsolve to the reference element,
     #do the local transformation there and then transform back to the global BEM++ dofs
-    for el in ng_space.Elements(ngs.BND):
-      if mask[el.index]:
+    # for el in ng_space.Elements(ngs.BND):
+    # if mask[el.index]:
+    for el in bembnd.Elements():
         bem_el=bem_elements[:,elId];
-        ng_dofs=el.dofs
-
-        ngshape=ng_space.GetFE(ngs.ElementId(el));
+        # ng_dofs=el.dofs
+        ng_dofs=ng_space.GetDofNrs(el)
+        ngshape=ng_space.GetFE(el)
 
 
         #evaluate the NGSolve basis in the Lagrange points to get coefficients of the local transformation

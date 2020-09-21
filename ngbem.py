@@ -20,8 +20,6 @@ def surface_mesh_from_ng(mesh,bembnd=None):
     pnts = []
     els = []
     dominds = []
-    # for se in mesh.Elements(ngs.BND):
-    # if mask[se.index]:
     for se in bembnd.Elements():
             for vert in se.vertices:
                 if(nodeToSurfaceNode[vert.nr] == -1): #found one we hadnt before
@@ -38,34 +36,10 @@ def surface_mesh_from_ng(mesh,bembnd=None):
     #forget about the non-surface vertices
     nv=surfaceNodeIdx;
     print("got ",nv," surface vertices")
-    # vertices=np.ndarray([3,nv],dtype=np.float64);
 
-    # ngmesh = mesh.ngmesh
-    # from netgen.meshing import PointId
-    # for i in range(0,nv):
-    #     ngp=ngmesh.Points()[PointId(surfaceNodeToNode[i]+1)];
-    #     vertices[:,i]=ngp.p
 
+    #setup the new lists
     vertices = np.array(list( zip(*pnts) ))
-
-    
-    # domain_indices=np.zeros([nse],dtype=np.int);
-    # elements=np.zeros([3,nse],dtype=np.int);
-    # i=0;
-    # for el in mesh.Elements(ngs.BND):
-    #   if mask[se.index]:        
-    #     j=0;
-    #     domain_indices[i]=el.index;
-    #     for p in el.vertices:
-    #         elements[j,i]=nodeToSurfaceNode[p.nr]
-    #         j+=1;
-    #     i+=1;
-
-    # filter only valid els, should be done from the beginning
-    # els2 = []
-    # for i in range(nse):
-    # if elements[0,i] >= 0:
-    # els2.append( (elements[0,i], elements[1,i], elements[2,i]) )
     elements = np.array(list(zip(*els)))
     domain_indices = np.array(dominds, dtype=np.int)
     
@@ -73,8 +47,12 @@ def surface_mesh_from_ng(mesh,bembnd=None):
 
 
 def bempp_grid_from_ng(mesh,bembnd=None):
-    #from bempp.api import grid_from_element_data
-    from bempp.api import Grid as grid_from_element_data
+    #the naming of the factory has changed between BEM++ and bepp-cl
+    try:
+        from bempp.api import Grid as grid_from_element_data
+    except:
+        from bempp.api import grid_from_element_data
+
     [bm_coords,bm_cells,domain_indices,bm_nodes] = surface_mesh_from_ng(mesh, bembnd)
 
     bempp_boundary_grid = grid_from_element_data(
@@ -104,7 +82,6 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None, bembnd=None):
 
     import ngsolve as ngs;
     from bempp.api import function_space, ALL
-    from bempp.api import Grid as grid_from_element_data
     import numpy as np
 
     mesh = ng_space.mesh;
@@ -113,9 +90,7 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None, bembnd=None):
     mask = bembnd.Mask()
 
     if(bempp_boundary_grid==None):
-        [bm_coords,bm_cells,domain_indices,bm_nodes] = surface_mesh_from_ng(mesh, bembnd);
-        bempp_boundary_grid = grid_from_element_data(
-            bm_coords, bm_cells,domain_indices)
+        bempp_boundary_grid=bempp_grid_from_ng(mesh,bemnd)
 
     # First get trace space
     if(ng_space.type=='h1ho'):
@@ -124,7 +99,13 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None, bembnd=None):
         space = function_space(bempp_boundary_grid, "DP", ng_space.globalorder)
 
     # Now compute the mapping from NGSolve dofs to BEM++ dofs.
-    bem_elements = bempp_boundary_grid.elements#list(bempp_boundary_grid.leaf_view.entity_iterator(0))
+    if hasattr(bempp_boundary_grid, 'leaf_view'):
+        use_legacy=True
+        bem_elements = list(bempp_boundary_grid.leaf_view.entity_iterator(0))
+    else:
+        use_legacy=False
+        bem_elements = bempp_boundary_grid.elements
+    
 
     n_bem=space.global_dof_count;
     n_ng=ng_space.ndof;
@@ -150,10 +131,16 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None, bembnd=None):
             eval_pts[:,pt_id]=[xi,yi];
             pt_id+=1;
 
-    #leaf=space.grid.leaf_view;
-    el0=bem_elements[:,0]#leaf.element_from_index(0);
 
-    bem_shape=space.shapeset#(el0);
+    if(use_legacy):
+        leaf=space.grid.leaf_view;
+        el0=leaf.element_from_index(0);        
+        bem_shape=space.shapeset(el0);
+    else:
+        el0=bem_elements[:,0]
+        bem_shape=space.shapeset
+
+
     vj=bem_shape.evaluate(eval_pts)
     print("error due to eval",np.linalg.norm(vj-np.eye(nd)));
 
@@ -177,11 +164,7 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None, bembnd=None):
     idCnt=0;
     #on each element, we map from ngsolve to the reference element,
     #do the local transformation there and then transform back to the global BEM++ dofs
-    # for el in ng_space.Elements(ngs.BND):
-    # if mask[el.index]:
     for el in bembnd.Elements():
-        bem_el=bem_elements[:,elId];
-        # ng_dofs=el.dofs
         ng_dofs=ng_space.GetDofNrs(el)
         ngshape=ng_space.GetFE(el)
 
@@ -199,9 +182,12 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None, bembnd=None):
         local_ndofs=len(ng_dofs)
         assert(nd==local_ndofs)
 
-        #bem_global_dofs, bem_weights = space.get_global_dofs(bem_el, dof_weights=True)
-        bem_global_dofs =  space.local2global[elId]
-        bem_weights = space.local_multipliers[elId]
+        if(use_legacy):
+            bem_el=bem_elements[elId];
+            bem_global_dofs, bem_weights = space.get_global_dofs(bem_el, dof_weights=True)
+        else:
+            bem_global_dofs =  space.local2global[elId]
+            bem_weights = space.local_multipliers[elId]
 
         ng_weights=np.ones(len(ng_dofs));
 

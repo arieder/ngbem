@@ -2,14 +2,11 @@
 
 def surface_mesh_from_ng(mesh,bembnd=None):
     import numpy as np;
-    import ngsolve as ngs;
 
     if bembnd is None:
         bembnd = mesh.Boundaries(".*")
-    mask = bembnd.Mask()
 
     nv=mesh.nv
-    nse=mesh.GetNE(ngs.BND)
 
     surfaceNodeToNode=np.full(nv,-1,np.int)
     nodeToSurfaceNode=np.full(nv,-1,np.int)
@@ -21,26 +18,24 @@ def surface_mesh_from_ng(mesh,bembnd=None):
     els = []
     dominds = []
     for se in bembnd.Elements():
-            for vert in se.vertices:
-                if(nodeToSurfaceNode[vert.nr] == -1): #found one we hadnt before
-                    nodeToSurfaceNode[vert.nr]=surfaceNodeIdx;
-                    surfaceNodeToNode[surfaceNodeIdx]=vert.nr;
+        for vert in se.vertices:
+            if(nodeToSurfaceNode[vert.nr] == -1): #found one we hadnt before
+                nodeToSurfaceNode[vert.nr]=surfaceNodeIdx;
+                surfaceNodeToNode[surfaceNodeIdx]=vert.nr;
                 
-                    surfaceNodeIdx+=1;
-                    pnts.append (mesh[vert].point)
+                surfaceNodeIdx+=1;
+                pnts.append (mesh[vert].point)
 
-            els.append ( [nodeToSurfaceNode[v.nr] for v in se.vertices] )
-            dominds.append(se.index)
+        els.append ( [nodeToSurfaceNode[v.nr] for v in se.vertices] )
+        dominds.append(se.index)
 
 
     #forget about the non-surface vertices
     nv=surfaceNodeIdx;
     print("got ",nv," surface vertices")
 
-
-    #setup the new lists
-    vertices = np.array(list( zip(*pnts) ))
-    elements = np.array(list(zip(*els)))
+    vertices = np.array(pnts).T
+    elements = np.array(els).T
     domain_indices = np.array(dominds, dtype=np.int)
     
     return [vertices,elements,domain_indices, surfaceNodeToNode[0:nv]]
@@ -53,13 +48,9 @@ def bempp_grid_from_ng(mesh,bembnd=None):
     except:
         from bempp.api import grid_from_element_data
 
-    [bm_coords,bm_cells,domain_indices,bm_nodes] = surface_mesh_from_ng(mesh, bembnd)
+    bm_coords,bm_cells,domain_indices,bm_nodes = surface_mesh_from_ng(mesh, bembnd)
 
-    bempp_boundary_grid = grid_from_element_data(
-        bm_coords, bm_cells,domain_indices)
-    
-    return bempp_boundary_grid
-
+    return grid_from_element_data(bm_coords, bm_cells,domain_indices)
 
 
 def ng_surface_trace(ng_space,bempp_boundary_grid=None, bembnd=None):
@@ -73,21 +64,15 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None, bembnd=None):
     trace coefficients in the corresponding BEM++ space.
     """
 
-    import ngsolve as ngs;
-
-
-    # if(ng_space.type != 'h1ho' and ng_space.type!='l2surf'):
-    if ng_space.type not in ['h1ho', 'l2surf', 'wrapped-l2surf']:
-        raise ValueError("ng_space must be a valid H1 or L2 surface space")
-
-    import ngsolve as ngs;
     from bempp.api import function_space, ALL
     import numpy as np
+
+    if ng_space.type not in ['h1ho', 'l2surf', 'wrapped-l2surf']:
+        raise ValueError("ng_space must be a valid H1 or L2 surface space")
 
     mesh = ng_space.mesh;
     if bembnd is None:
         bembnd = mesh.Boundaries(".*")
-    mask = bembnd.Mask()
 
     if(bempp_boundary_grid==None):
         bempp_boundary_grid=bempp_grid_from_ng(mesh,bemnd)
@@ -114,23 +99,18 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None, bembnd=None):
     print("doing order ",k);
     nd=int((k+1)*(k+2)/2) ##number of degrees of freedom on the reference element
 
+    if k == 0:
+        eval_pts = [(1/3, 1/3)]   # center point
+    else:
+        eval_pts = [ (i/k, j/k) for j in range(k+1) for i in range(k-j+1)]
 
-    #setup the lagrange interpolation points for the BEM++ local basis
-    eval_pts=np.zeros([2,nd]);
-    pt_id=0;
-    for j in range(0,k+1):
-        if(k==0):
-            yi=0.5;
-        else:
-            yi=j/k;
-        for i in range(0,k-j+1):
-            if(k==0):
-                xi=0.5
-            else:
-                xi=i/k;
-            eval_pts[:,pt_id]=[xi,yi];
-            pt_id+=1;
+    #NGSolve and BEM++ use a different reference element.
+    #The map TA x + b does this transformatuib
+    # TA=np.asarray([[-1, -1], [1, 0]]);
+    # Tb=np.asarray([1, 0]);
+    ngpts = [ (1-x-y, x) for x,y in eval_pts ]
 
+    eval_pts = np.array(eval_pts).T
 
     if(use_legacy):
         leaf=space.grid.leaf_view;
@@ -147,37 +127,24 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None, bembnd=None):
 
     local_bem_to_ng=np.zeros([nd,nd]);
 
-    #NGSolve and BEM++ use a different reference element.
-    #The map TA x + b does this transformatuib
-    TA=np.asarray([[-1, -1], [1, 0]]);
-    Tb=np.asarray([1, 0]);
-
-
     todo=np.ones([n_bem]); #stores  which indices we already visited
 
-    iis=np.zeros([nd*n_bem],dtype=np.int64);
-    ijs=np.zeros([nd*n_bem],dtype=np.int64);
-    data=np.zeros([nd*n_bem]);
-
-    elId=0;
+    iis=np.zeros([n_bem,nd],dtype=np.int64);
+    ijs=np.zeros([n_bem,nd],dtype=np.int64);
+    data=np.zeros([n_bem,nd]);
 
     idCnt=0;
     #on each element, we map from ngsolve to the reference element,
     #do the local transformation there and then transform back to the global BEM++ dofs
-    for el in bembnd.Elements():
+    for elId, el in enumerate(bembnd.Elements()):
         ng_dofs=ng_space.GetDofNrs(el)
-        ngshape=ng_space.GetFE(el)
-
+        ng_fe=ng_space.GetFE(el)
 
         #evaluate the NGSolve basis in the Lagrange points to get coefficients of the local transformation
         for j in range(0,nd):
-            tx=TA.dot(eval_pts[:,j])+Tb;
-            uj=ngshape.CalcShape(tx[0],tx[1],0);
-            local_bem_to_ng[:,j]=uj;
-
+            local_bem_to_ng[:,j] = ng_fe.CalcShape(*ngpts[j]) 
 
         local_trafo=(local_bem_to_ng);
-
 
         local_ndofs=len(ng_dofs)
         assert(nd==local_ndofs)
@@ -189,37 +156,31 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None, bembnd=None):
             bem_global_dofs =  space.local2global[elId]
             bem_weights = space.local_multipliers[elId]
 
-        ng_weights=np.ones(len(ng_dofs));
-
         assert(len(bem_global_dofs) == len(ng_dofs));
 
-        for i in range(0,local_ndofs):
+        for i in range(local_ndofs):
             gbid=bem_global_dofs[i];
-            if(todo[gbid]==1): ##we havent dealt with this index before
-                for j in range(0,local_ndofs):
-                    gngid=ng_dofs[j];
-                    iis[idCnt]=gbid;
-                    ijs[idCnt]=gngid;
-                    data[idCnt]=bem_weights[i]*local_trafo[j,i];
-
-                    idCnt+=1;
-                todo[gbid]-=1;
-
-
-        elId+=1;
-
+            if todo[gbid]==1: ##we havent dealt with this index before
+                todo[gbid] = 0
+                iis[idCnt,:] = gbid
+                ijs[idCnt,:] = ng_dofs[:]
+                data[idCnt,:] = bem_weights[i]*local_trafo[:,i];
+                idCnt += 1
 
 
     assert(np.count_nonzero(todo)==0)
-    assert(idCnt==nd*n_bem)
+    assert(idCnt==n_bem)
 
     # build up the sparse matrix containing our transformation
     from scipy.sparse import coo_matrix
-
-    trace_matrix=coo_matrix((data,(iis,ijs)),shape=(space.global_dof_count,ng_space.ndof));
+    trace_matrix=coo_matrix((data.flatten(),(iis.flatten(),ijs.flatten())),
+                                shape=(space.global_dof_count,ng_space.ndof));
 
     # Now return everything
     return space, trace_matrix
+
+
+
 
 def L2_trace(ng_space,bempp_boundary_grid=None,also_give_dn=False,weight1=1,weight2=1):
     from ngsolve import FacetFESpace, SurfaceL2,comp,BND, InnerProduct, specialcf
@@ -232,9 +193,7 @@ def L2_trace(ng_space,bempp_boundary_grid=None,also_give_dn=False,weight1=1,weig
     E1 = comp.ConvertOperator(spacea=ng_space, spaceb=F,trial_cf=(weight1)*ng_space.TrialFunction())
     E2 = comp.ConvertOperator(spacea=F, spaceb=S, vb=BND)
 
-    
     E = to_sparse_matrix(E2) @ to_sparse_matrix(E1)
-
 
     #from ngsolve import  GridFunction, specialcf
     #from ngsolve.fem import  LoggingCF
@@ -268,7 +227,6 @@ def weight_bem_function(space,power):
 
     n_bem=space.global_dof_count
     todo=np.ones([n_bem]); #stores  which indices we already visited                                                                                                                                                                        
-                                   
 
     iis=np.zeros([n_bem],dtype=np.int64);
     ijs=np.zeros([n_bem],dtype=np.int64);

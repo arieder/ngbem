@@ -75,7 +75,7 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None, bembnd=None):
         bembnd = mesh.Boundaries(".*")
 
     if(bempp_boundary_grid==None):
-        bempp_boundary_grid=bempp_grid_from_ng(mesh,bemnd)
+        bempp_boundary_grid=bempp_grid_from_ng(mesh,bembnd)
 
     # First get trace space
     if(ng_space.type=='h1ho'):
@@ -116,12 +116,11 @@ def ng_surface_trace(ng_space,bempp_boundary_grid=None, bembnd=None):
         leaf=space.grid.leaf_view;
         el0=leaf.element_from_index(0);        
         bem_shape=space.shapeset(el0);
+        vj=bem_shape.evaluate(eval_pts,ALL)
     else:
         el0=bem_elements[:,0]
         bem_shape=space.shapeset
-
-
-    vj=bem_shape.evaluate(eval_pts)
+        vj=bem_shape.evaluate(eval_pts)
     print("error due to eval",np.linalg.norm(vj-np.eye(nd)));
 
 
